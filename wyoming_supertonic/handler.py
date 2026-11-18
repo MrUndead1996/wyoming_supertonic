@@ -1,6 +1,7 @@
 import argparse
 import asyncio
 import logging
+import re
 
 from sentence_stream import SentenceBoundaryDetector
 from wyoming.audio import AudioChunk, AudioStart, AudioStop
@@ -17,8 +18,41 @@ from wyoming.tts import (
 )
 
 from .supertonic_engine import SupertonicEngine
+from .normalization import StreamingCleaner
 
 _LOGGER = logging.getLogger(__name__)
+_ABBREVIATION_SHIELD = re.compile(
+    r"т\.\s*е\.|т\.е\.|т\.\s*д\.|т\.д\.|т\.\s*п\.|т\.п\.|т\.\s*к\.|т\.к\.|напр\.",
+    re.I,
+)
+_ABBREVIATION_TAIL = 12
+
+
+class _AbbreviationShield:
+    """Keep Russian dotted abbreviations intact until the detector sees them."""
+
+    def __init__(self):
+        self.pending = ""
+
+    @staticmethod
+    def _shield(text):
+        return _ABBREVIATION_SHIELD.sub(lambda m: m[0].replace(".", "\ue000"), text)
+
+    def add(self, text):
+        self.pending += text
+        shielded = self._shield(self.pending)
+        safe = max(0, len(shielded) - _ABBREVIATION_TAIL)
+        emitted, self.pending = shielded[:safe], shielded[safe:]
+        return emitted
+
+    def finish(self):
+        result = self._shield(self.pending)
+        self.pending = ""
+        return result
+
+    @staticmethod
+    def restore(text):
+        return text.replace("\ue000", ".")
 
 
 class SupertonicEventHandler(AsyncEventHandler):
@@ -46,6 +80,34 @@ class SupertonicEventHandler(AsyncEventHandler):
         self._current_voice = None
         self._current_language = self.cli_args.language
         self._session_scale = None
+        self._cleaner = None
+        self._abbreviation_shield = None
+
+    def _new_request_pipeline(self):
+        config = getattr(self.cli_args, "normalization_config", None)
+        use_cleanup = bool(
+            config and config.profile == "enhanced" and config.cleanup
+            and self._current_language.split("-")[0].split("_")[0].lower() == "ru"
+        )
+        self._cleaner = StreamingCleaner() if use_cleanup else None
+        self._abbreviation_shield = (
+            _AbbreviationShield()
+            if config and config.profile == "enhanced" and config.abbreviations
+            and self._current_language.split("-")[0].split("_")[0].lower() == "ru"
+            else None
+        )
+
+    def _preprocess_for_detector(self, text, final=False):
+        if self._cleaner is not None:
+            if final:
+                text = self._cleaner.add(text) + self._cleaner.finish()
+                self._cleaner = None
+            else:
+                text = self._cleaner.add(text)
+        if self._abbreviation_shield is not None:
+            shield = self._abbreviation_shield
+            text = shield.add(text) + (shield.finish() if final else "")
+        return text
 
     async def handle_event(self, event: Event) -> bool:
         """Handle incoming Wyoming event."""
@@ -60,6 +122,8 @@ class SupertonicEventHandler(AsyncEventHandler):
                     return True
 
                 syn = Synthesize.from_event(event)
+                self._current_voice = None
+                self._current_language = self.cli_args.language
                 voice_data = event.data.get("voice", {})
                 lang = voice_data.get("language")
 
@@ -83,13 +147,14 @@ class SupertonicEventHandler(AsyncEventHandler):
                     return True
 
                 start = SynthesizeStart.from_event(event)
+                self._current_voice = None
+                self._current_language = self.cli_args.language
                 voice_data = event.data.get("voice", {})
                 lang = voice_data.get("language")
 
                 self._is_streaming = True
                 self._audio_started = False
                 self.sbd = SentenceBoundaryDetector()
-
                 # Reset session scale at the start of a streaming response
                 self._session_scale = None
 
@@ -98,6 +163,7 @@ class SupertonicEventHandler(AsyncEventHandler):
 
                 if lang:
                     self._current_language = lang
+                self._new_request_pipeline()
 
                 _LOGGER.debug(
                     f"Stream started. Voice: {self._current_voice}, Language: {self._current_language}"
@@ -109,7 +175,8 @@ class SupertonicEventHandler(AsyncEventHandler):
                 if not self._is_streaming:
                     return True
                 chunk = SynthesizeChunk.from_event(event)
-                for sentence in self.sbd.add_chunk(chunk.text):
+                detector_text = self._preprocess_for_detector(chunk.text)
+                for sentence in self.sbd.add_chunk(detector_text):
                     await self._process_sentence(sentence)
                 return True
 
@@ -118,6 +185,9 @@ class SupertonicEventHandler(AsyncEventHandler):
                 if not self._is_streaming:
                     return True
 
+                detector_text = self._preprocess_for_detector("", final=True)
+                for sentence in self.sbd.add_chunk(detector_text):
+                    await self._process_sentence(sentence)
                 remaining = self.sbd.finish()
                 if remaining:
                     await self._process_sentence(remaining)
@@ -128,6 +198,8 @@ class SupertonicEventHandler(AsyncEventHandler):
                 await self.write_event(SynthesizeStopped().event())
                 self._is_streaming = False
                 self._session_scale = None
+                self._cleaner = None
+                self._abbreviation_shield = None
                 return True
 
         except Exception as err:
@@ -135,6 +207,8 @@ class SupertonicEventHandler(AsyncEventHandler):
             await self.write_event(Error(text=str(err), code=err.__class__.__name__).event())
             self._is_streaming = False
             self._session_scale = None
+            self._cleaner = None
+            self._abbreviation_shield = None
 
         return True
 
@@ -142,8 +216,10 @@ class SupertonicEventHandler(AsyncEventHandler):
         """Process a complete text synthesis request."""
         self._audio_started = False
         self.sbd = SentenceBoundaryDetector()
+        self._new_request_pipeline()
 
-        sentences = list(self.sbd.add_chunk(text))
+        detector_text = self._preprocess_for_detector(text, final=True)
+        sentences = list(self.sbd.add_chunk(detector_text))
         remaining = self.sbd.finish()
         if remaining:
             sentences.append(remaining)
@@ -151,6 +227,8 @@ class SupertonicEventHandler(AsyncEventHandler):
         for s in sentences:
             await self._process_sentence(s)
 
+        self._cleaner = None
+        self._abbreviation_shield = None
         if self._audio_started:
             await self.write_event(AudioStop().event())
         return True
@@ -161,6 +239,9 @@ class SupertonicEventHandler(AsyncEventHandler):
         if not s:
             return
 
+        shield = self._abbreviation_shield
+        if shield is not None:
+            s = shield.restore(s)
         await self._synthesize_text(s)
 
     async def _synthesize_text(self, text: str):

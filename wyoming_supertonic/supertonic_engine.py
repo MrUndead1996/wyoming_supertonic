@@ -28,6 +28,7 @@ class SupertonicEngine:
         model_path: str = None,
         crop_silence_ms: int = 300,
         target_db: Optional[float] = None,
+        normalization_config=None,
     ) -> None:
         """
         Initialize engine settings.
@@ -44,6 +45,7 @@ class SupertonicEngine:
         self.model_path = model_path
         self.crop_silence_ms = crop_silence_ms
         self.target_db = target_db
+        self.normalization_config = normalization_config
         self.tts = None
         self.sample_rate = 44100
 
@@ -74,6 +76,13 @@ class SupertonicEngine:
         Fails safely if a module's dependencies are missing.
         """
         for lang, (module_name, class_name) in NORMALIZERS_REGISTRY.items():
+            if lang == "ru" and self.normalization_config is not None:
+                if self.normalization_config.profile == "enhanced":
+                    from .normalization import TextNormalizer
+                    # Explicit configuration/resource failures must stop startup.
+                    self.normalizers[lang] = TextNormalizer(self.normalization_config)
+                    _LOGGER.debug("[ru] Enhanced text normalizer loaded successfully.")
+                    continue
             try:
                 module = importlib.import_module(module_name, package=__package__)
                 normalizer_class = getattr(module, class_name)

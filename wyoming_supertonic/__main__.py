@@ -13,6 +13,7 @@ from wyoming.server import AsyncTcpServer
 from . import __version__
 from .handler import SupertonicEventHandler
 from .supertonic_engine import SupertonicEngine
+from .normalization import NormalizationConfig
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -29,7 +30,21 @@ def parse_target_db(val: str) -> Optional[float]:
         )
 
 
-async def main() -> None:
+def _env_bool(env, name, default):
+    value = env.get(name)
+    if value is None:
+        return default
+    normalized = value.strip().lower()
+    if normalized == "true":
+        return True
+    if normalized == "false":
+        return False
+    raise argparse.ArgumentTypeError(f"{name} must be true or false, got {value!r}")
+
+
+def parse_args(argv=None, env=None):
+    """Parse command-line and normalization environment settings."""
+    env = os.environ if env is None else env
     parser = argparse.ArgumentParser()
     parser.add_argument("--uri", default="tcp://0.0.0.0:10209", help="Server URI")
     parser.add_argument("--data-dir", default=None, help="Path to models (optional for V3)")
@@ -49,7 +64,66 @@ async def main() -> None:
     parser.add_argument("--log-format", default=logging.BASIC_FORMAT, help="Log format")
     parser.add_argument("--version", action="version", version=__version__)
 
-    args = parser.parse_args()
+    raw_argv = list(sys.argv[1:] if argv is None else argv)
+    parser.add_argument("--normalization-profile", choices=("legacy", "enhanced"), default=None)
+    parser.add_argument("--stress-mode", choices=("model", "off", "silero-stress"), default=None)
+    bool_fields = {
+        "cleanup": True, "dictionary": True, "abbreviations": True,
+        "numbers": True, "dates": True, "units": True,
+    }
+    for name, default in bool_fields.items():
+        parser.add_argument(
+            f"--normalize-{name}", action=argparse.BooleanOptionalAction,
+            default=None,
+        )
+    parser.add_argument("--dictionary-path", default=env.get("SUPERTONIC_DICTIONARY_PATH"))
+    args = parser.parse_args(raw_argv)
+
+    profile_env = env.get("SUPERTONIC_NORMALIZATION_PROFILE", "legacy")
+    if args.normalization_profile is None:
+        if profile_env not in {"legacy", "enhanced"}:
+            parser.error("SUPERTONIC_NORMALIZATION_PROFILE must be legacy or enhanced")
+        args.normalization_profile = profile_env
+    stress_env = env.get("SUPERTONIC_STRESS_MODE", "model")
+    if args.stress_mode is None:
+        if stress_env not in {"model", "off", "silero-stress"}:
+            parser.error("SUPERTONIC_STRESS_MODE must be model, off, or silero-stress")
+        args.stress_mode = stress_env
+    for name, default in bool_fields.items():
+        option = f"--normalize-{name}"
+        no_option = f"--no-normalize-{name}"
+        was_set = any(arg == option or arg == no_option for arg in raw_argv)
+        if not was_set:
+            env_name = "SUPERTONIC_NORMALIZE_" + name.upper()
+            try:
+                setattr(args, f"normalize_{name}", _env_bool(env, env_name, default))
+            except argparse.ArgumentTypeError as exc:
+                parser.error(str(exc))
+        elif getattr(args, f"normalize_{name}") is None:
+            setattr(args, f"normalize_{name}", default)
+
+    # The legacy adapter intentionally retains ru_norm's historical behavior.
+    # Do not silently imply that enhanced-only controls affect that pipeline.
+    if args.normalization_profile == "legacy":
+        changed = [name for name, default in bool_fields.items() if getattr(args, f"normalize_{name}") != default]
+        if changed or args.stress_mode != "model" or args.dictionary_path:
+            parser.error("normalization stage flags, stress mode, and dictionary path require --normalization-profile enhanced")
+    args.normalization_config = NormalizationConfig(
+        profile=args.normalization_profile,
+        cleanup=args.normalize_cleanup,
+        dictionary=args.normalize_dictionary,
+        abbreviations=args.normalize_abbreviations,
+        numbers=args.normalize_numbers,
+        dates=args.normalize_dates,
+        units=args.normalize_units,
+        stress=args.stress_mode,
+        dictionary_path=args.dictionary_path,
+    )
+    return args
+
+
+async def main() -> None:
+    args = parse_args()
 
     logging.basicConfig(level=logging.DEBUG if args.debug else logging.INFO, format=args.log_format)
 
@@ -64,6 +138,7 @@ async def main() -> None:
         model_path=args.data_dir,
         crop_silence_ms=args.crop_silence,
         target_db=args.target_db,
+        normalization_config=args.normalization_config,
     )
 
     try:
