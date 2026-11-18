@@ -42,6 +42,16 @@ def _env_bool(env, name, default):
     raise argparse.ArgumentTypeError(f"{name} must be true or false, got {value!r}")
 
 
+def _positive_int(value):
+    try:
+        result = int(value)
+    except (ValueError, TypeError):
+        raise argparse.ArgumentTypeError("question marks must be a positive integer") from None
+    if result < 1:
+        raise argparse.ArgumentTypeError("question marks must be a positive integer")
+    return result
+
+
 def parse_args(argv=None, env=None):
     """Parse command-line and normalization environment settings."""
     env = os.environ if env is None else env
@@ -77,6 +87,11 @@ def parse_args(argv=None, env=None):
             default=None,
         )
     parser.add_argument("--dictionary-path", default=env.get("SUPERTONIC_DICTIONARY_PATH"))
+    parser.add_argument(
+        "--question-marks", type=_positive_int,
+        default=env.get("SUPERTONIC_QUESTION_MARKS", "1"),
+        help="Minimum question-mark run length sent to the model (default: 1, unchanged)",
+    )
     args = parser.parse_args(raw_argv)
 
     profile_env = env.get("SUPERTONIC_NORMALIZATION_PROFILE", "legacy")
@@ -139,6 +154,7 @@ async def main() -> None:
         crop_silence_ms=args.crop_silence,
         target_db=args.target_db,
         normalization_config=args.normalization_config,
+        question_marks=args.question_marks,
     )
 
     try:

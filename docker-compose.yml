@@ -17,6 +17,8 @@ services:
     #   SUPERTONIC_NORMALIZATION_PROFILE: enhanced
     #   SUPERTONIC_STRESS_MODE: off
     #   SUPERTONIC_DICTIONARY_PATH: /config/supertonic-dictionary.yaml
+    # Optional prosody hint (all languages/profiles; default 1 = unchanged):
+    #   SUPERTONIC_QUESTION_MARKS: "3"
     volumes:
       # Persists the auto-downloaded model (~ a few hundred MB) so it
       # survives container rebuilds/restarts.

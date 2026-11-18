@@ -57,6 +57,14 @@ The initial synthesized audio for each sentence is framed by silence on both sid
 | `et` | Estonian | `lt` | Lithuanian | `vi` | Vietnamese |
 | `fi` | Finnish | `lv` | Latvian | `nl` | Dutch |
 
+### Question intonation (experimental)
+
+To strengthen the question punctuation sent to Supertonic, set the runtime
+environment variable `SUPERTONIC_QUESTION_MARKS: "3"` or pass `--question-marks 3`.
+This changes `?` to `???`, preserving longer runs. Default: `1` (unchanged).
+It works with all languages/profiles and batch/streaming requests, but does not
+guarantee question intonation. See [ENV.md](ENV.md).
+
 ### Text normalization
 
 Russian normalization defaults to the **legacy** profile, which preserves the

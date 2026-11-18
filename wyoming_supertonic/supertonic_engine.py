@@ -1,6 +1,7 @@
 import importlib
 import inspect
 import logging
+import re
 from typing import Optional, Tuple
 
 import numpy as np
@@ -29,6 +30,7 @@ class SupertonicEngine:
         crop_silence_ms: int = 300,
         target_db: Optional[float] = None,
         normalization_config=None,
+        question_marks: int = 1,
     ) -> None:
         """
         Initialize engine settings.
@@ -39,13 +41,17 @@ class SupertonicEngine:
             model_path: Optional path for models.
             crop_silence_ms: Silence to remove from both ends.
             target_db: Target peak audio volume normalization level in dBFS (e.g. -3.0).
+            question_marks: Minimum length of question-mark runs; 1 leaves text unchanged.
         """
+        if isinstance(question_marks, bool) or not isinstance(question_marks, int) or question_marks < 1:
+            raise ValueError("question_marks must be a positive integer")
         self.steps = steps
         self.speed = speed
         self.model_path = model_path
         self.crop_silence_ms = crop_silence_ms
         self.target_db = target_db
         self.normalization_config = normalization_config
+        self.question_marks = question_marks
         self.tts = None
         self.sample_rate = 44100
 
@@ -168,6 +174,12 @@ class SupertonicEngine:
                     "[%s] Synth: %s",
                     short_lang, text
                 )
+
+        # Experimental prosody hint, applied after normalization for all languages.
+        # Preserve longer runs and mixed punctuation; the default is a no-op.
+        if self.question_marks > 1:
+            text = re.sub(r"\?+", lambda m: "?" * max(len(m[0]), self.question_marks), text)
+            _LOGGER.debug("[%s] Question-mark prosody hint: %s", short_lang, text)
 
         # 3. Resolve Voice Style (Lazy Caching)
         if voice_name not in self._style_cache:

@@ -6,6 +6,23 @@ variable. Environment booleans are case-insensitive, but only `true` and
 `false` are accepted. An invalid environment value is an error unless the
 corresponding CLI option overrides it.
 
+## Question intonation (experimental)
+
+`SUPERTONIC_QUESTION_MARKS=3` or `--question-marks 3` expands each run of ASCII
+question marks to at least three marks immediately before model synthesis,
+after normalization. For example, `Ты дома?` becomes `Ты дома???`.
+Longer runs are preserved, not multiplied; other punctuation is unchanged.
+The default is `1` (no changes). The value must be a positive integer;
+CLI overrides the environment variable.
+
+This applies to all languages, both normalization profiles, and batch/streaming
+requests. It is a prosody hint, not a guarantee of question intonation.
+
+```yaml
+environment:
+  SUPERTONIC_QUESTION_MARKS: "3"
+```
+
 ## Normalization options
 
 | Setting | CLI option | Environment variable | Default | Effect |
