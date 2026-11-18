@@ -59,6 +59,10 @@ def parse_args(argv=None, env=None):
     parser.add_argument("--uri", default="tcp://0.0.0.0:10209", help="Server URI")
     parser.add_argument("--data-dir", default=None, help="Path to models (optional for V3)")
     parser.add_argument("--language", default="en", help="Default voice language")
+    parser.add_argument(
+        "--default-voice", default=None,
+        help="Default voice ID (e.g. F2); defaults to the first available voice",
+    )
     parser.add_argument("--crop-silence", type=int, default=260, help="Crop silence from start and end")
     parser.add_argument("--steps", type=int, default=5, help="Denoising steps")
     parser.add_argument("--speed", type=float, default=1.0, help="Speech speed")
@@ -161,6 +165,13 @@ async def main() -> None:
         await asyncio.to_thread(engine.load)
     except Exception as e:
         _LOGGER.fatal(f"Load error: {e}")
+        return
+
+    if args.default_voice is not None and args.default_voice not in engine.available_voices:
+        _LOGGER.fatal(
+            "Unknown default voice %r. Available voices: %s",
+            args.default_voice, ", ".join(engine.available_voices),
+        )
         return
 
     wyoming_voices = []

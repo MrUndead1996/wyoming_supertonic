@@ -70,6 +70,7 @@ counterparts:
 | `--uri URI` | `tcp://0.0.0.0:10209` | Wyoming TCP listen address. |
 | `--data-dir PATH` | unset | Supertonic model directory. |
 | `--language LANG` | `en` | Default request language; individual Wyoming requests may select another language. |
+| `--default-voice ID` | first available voice | Voice used when the client omits a voice or specifies an unknown ID. A valid client voice takes precedence. An unavailable default is rejected at startup. |
 | `--crop-silence MS` | `260` | Silence to crop at audio edges. |
 | `--steps N` | `5` | Supertonic denoising steps. |
 | `--speed RATE` | `1.0` | Speech speed multiplier. |

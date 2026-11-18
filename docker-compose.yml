@@ -28,6 +28,7 @@ services:
     # Anything here is forwarded by docker_run.sh to `python -m wyoming_supertonic`
     command:
       - --language=en
+      # - --default-voice=F2
       - --speed=1.0
       - --steps=5
       - --threads=4

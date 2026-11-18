@@ -33,6 +33,7 @@ python3 -m wyoming_supertonic --uri 'tcp://0.0.0.0:10209'
 ### Arguments
 
 *   `--language` Default voice language (default: `en`).      
+*   `--default-voice`: Default voice ID, e.g. `F2` (default: first available voice). A valid voice specified by the client takes precedence.
 *   `--uri`: Server URI (default: `tcp://0.0.0.0:10209`).
 *   `--speed`: Speech speed, 0.5 to 2.0 (default: `1.0`).
 *   `--steps`: Denoising steps. Higher is better quality but slower (default: `5`).
@@ -42,6 +43,14 @@ python3 -m wyoming_supertonic --uri 'tcp://0.0.0.0:10209'
 *   `--debug`: Enable debug logging.
 
 The initial synthesized audio for each sentence is framed by silence on both sides. I chose a default trim value of 260ms; if the pauses between sentences are unsatisfactory for you, try adjusting `--crop-silence` parameter.
+
+For example, to use `F2` when the client omits a voice or requests an unknown one:
+
+```bash
+python3 -m wyoming_supertonic --default-voice F2
+```
+
+The server rejects an unavailable default voice at startup and logs the available IDs.
 
 ### Supported Languages:
 | Code | Language | Code | Language | Code | Language |

@@ -249,6 +249,8 @@ class SupertonicEventHandler(AsyncEventHandler):
         voice_name = "M1"
         if self._current_voice and self._current_voice in self.engine.available_voices:
             voice_name = self._current_voice
+        elif getattr(self.cli_args, "default_voice", None) in self.engine.available_voices:
+            voice_name = self.cli_args.default_voice
         elif self.engine.available_voices:
             voice_name = self.engine.available_voices[0]
 
