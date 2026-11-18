@@ -1,11 +1,5 @@
+# syntax=docker/dockerfile:1
 FROM debian:trixie-slim
-
-# --- Build-time options ------------------------------------------------
-# SUPERTONIC_REF : branch/tag to clone from the upstream repo
-# WITH_RU        : set to "true" to install the extra Russian auto-stress
-#                  dependencies (adds build time + image size)
-ARG SUPERTONIC_REF=main
-ARG WITH_RU=false
 
 ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
@@ -24,18 +18,32 @@ RUN \
 
 WORKDIR /usr/src
 
-COPY ./ ./
+# Install dependencies before copying source so code changes reuse this layer.
+# Read requirements from pyproject.toml to avoid maintaining a duplicate list.
+COPY pyproject.toml ./
 
-# pyproject.toml already pins the runtime deps (supertonic, wyoming,
-# sentence-stream, num2words, onnxruntime, numpy). The optional "ru" extra
-# pulls in the extra libraries needed for Russian auto-stress.
-RUN if [ "${WITH_RU}" = "true" ]; then \
-        pip install --no-cache-dir ".[ru]"; \
-    else \
-        pip install --no-cache-dir .; \
-    fi
+# WITH_RU: include Russian auto-stress dependencies (extra time + image size).
+ARG WITH_RU=false
+RUN python3 - <<'PY'
+import os
+import tomllib
+from pathlib import Path
+
+project = tomllib.loads(Path("pyproject.toml").read_text())["project"]
+requirements = list(project["dependencies"])
+if os.environ["WITH_RU"] == "true":
+    requirements.extend(project["optional-dependencies"]["ru"])
+Path("/tmp/requirements.txt").write_text("\n".join(requirements) + "\n")
+PY
+
+# Cache packaging tools too; source-only rebuilds need no isolated build downloads.
+RUN pip install --no-cache-dir "setuptools>=77" wheel -r /tmp/requirements.txt \
+    && rm /tmp/requirements.txt
 
 RUN apt-get autoremove --purge -y git build-essential
+
+COPY ./ ./
+RUN pip install --no-cache-dir --no-deps --no-build-isolation .
 
 RUN chmod +x ./docker_run.sh && mkdir -p /data
 
