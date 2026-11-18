@@ -2,7 +2,7 @@
 import html
 import re
 
-_EXPRESSION_TAGS = {"laugh", "breath", "sigh"}
+_EXPRESSION_TAG_PATTERN = re.compile(r"</?(?:laugh|breath|sigh)>", re.I)
 
 class StreamingCleaner:
     def __init__(self, max_buffer=4096):
@@ -36,6 +36,7 @@ class StreamingCleaner:
                 if end >= 0:
                     i = end + 1
                     self._mode = "think"
+                    continue
                 elif final:
                     i = len(data)
                 else:
@@ -97,11 +98,6 @@ class StreamingCleaner:
                 self._mode = "think-open"
                 i += 6
                 continue
-            think = re.match(r"<think\s[^>]*>", tail, re.I)
-            if think:
-                self._mode = "think"
-                i += len(think[0])
-                continue
             if lower.startswith("<!--"):
                 self._mode = "html-comment"
                 i += 4
@@ -131,7 +127,7 @@ class StreamingCleaner:
                 tag = re.match(r"</?[A-Za-z][^>]*>", tail)
                 if tag:
                     token = tag[0]
-                    if re.fullmatch(r"</?(?:laugh|breath|sigh)>", token, re.I):
+                    if _EXPRESSION_TAG_PATTERN.fullmatch(token):
                         out.append(token)
                     i += len(token)
                     continue

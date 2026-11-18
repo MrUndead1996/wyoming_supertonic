@@ -41,6 +41,29 @@ class NormalizationCoreTests(unittest.TestCase):
         self.assertEqual(result, "hello ПРИВЕТ <laugh> МИР </sigh> world")
         self.assertTrue(all("hello" not in x and "world" not in x and "<laugh>" not in x for x in seen))
 
+    def test_accentor_never_sees_private_placeholders_or_protected_values(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "dict.yml"
+            path.write_text("pronunciations:\n  alias: словарь\n", encoding="utf-8")
+            n = TextNormalizer(NormalizationConfig(
+                profile="enhanced", stress="off", dictionary_path=str(path),
+            ))
+            calls = []
+
+            def hostile_accentor(text):
+                calls.append(text)
+                # Simulates an external model that drops non-letter symbols.
+                return "".join(char for char in text if char.isalpha() or char.isspace())
+
+            n.accentor = hostile_accentor
+            result = n.normalize("alias за́мок v1.2.3 обычный 2")
+
+            self.assertEqual(result, "словарь за́мок v1.2.3 обычный два")
+            self.assertTrue(calls)
+            self.assertTrue(all("\U000f0000" not in text for text in calls))
+            self.assertTrue(all(not any("A" <= char <= "Z" or "a" <= char <= "z" for char in text)
+                                for text in calls))
+
     def test_dictionary_longest_literal_and_nonrecursive(self):
         with tempfile.TemporaryDirectory() as td:
             path = Path(td) / "dict.yml"
@@ -103,8 +126,17 @@ class NormalizationCoreTests(unittest.TestCase):
         for _ in range(200):
             cleaner.add("x" * 200)
             self.assertLessEqual(len(cleaner._pending), 32)
-        cleaner.add(">secret</think>visible")
-        self.assertEqual(cleaner.finish(), " visible")
+        self.assertEqual(cleaner.add(">secret</think>visible"), " visible")
+        self.assertEqual(cleaner.finish(), "")
+
+    def test_think_opener_closes_and_drains_remainder_in_same_add(self):
+        cleaner = StreamingCleaner()
+        self.assertEqual(cleaner.add("<think "), "")
+        self.assertEqual(cleaner.add("attributes>secret</think>visible"), " visible")
+
+        unfinished = StreamingCleaner()
+        self.assertEqual(unfinished.add("<think "), "")
+        self.assertEqual(unfinished.finish(), "")
 
 
 if __name__ == "__main__":

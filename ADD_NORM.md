@@ -1,82 +1,43 @@
-If you have specific text processing needs for your language, you can create a new normalization file and add the necessary actions to it that are applied to each sentence.
+# Text normalizers
 
-### Overview
-The engine uses a modular architecture. To add a new language, you need to create a standalone normalizer script and register it in the main engine.
+The engine selects a normalizer by the request language. Russian has two
+profiles: `legacy` delegates to the existing `ru_norm.py`, while `enhanced`
+uses the independent `wyoming_supertonic.normalization` package. The default
+is legacy. See [ENV.md](ENV.md) for all profile controls.
 
----
+The enhanced profile is Russian-only. It does not transliterate Latin words or
+brand names; mixed-script content is left intact except for explicitly enabled
+normalization stages. It supports streaming cleanup before sentence detection,
+a literal YAML pronunciation dictionary, abbreviation expansion, and Russian
+numbers, dates, times, and units. It does not add SSML parsing.
 
-### Step 1: Create the Normalizer Script
-Create a new file in the same directory as your engine, for example: `de_norm.py` (for German). 
+## Add a normalizer for another language
 
-Your class must implement a `normalize` method. It is highly recommended to use the `num2words` library for consistency.
+`de` and `cs` are registered in
+[`wyoming_supertonic/supertonic_engine.py`](wyoming_supertonic/supertonic_engine.py).
+To add another language:
 
-**Template (`de_norm.py`):**
-```python
-import logging
-import re
-from num2words import num2words
+1. Add a module in `wyoming_supertonic/` with a class exposing
+   `normalize(text) -> str`.
+2. Register its module and class in `NORMALIZERS_REGISTRY`.
+3. Add `unittest` coverage under `tests/`, including expression-tag handling
+   and identifiers relevant to the language.
+4. Run `python -m unittest discover -s tests`.
 
-# Initialize logger to report normalization errors safely
-logger = logging.getLogger(__name__)
+Do not change the existing `ru_norm.py` as part of unrelated normalizer work.
+The enhanced Russian implementation is deliberately isolated so it can evolve
+without changing the legacy behavior. Keep `de` and `cs` behavior unchanged
+unless a separate change explicitly targets those languages.
 
-class GermanTextNormalizer:
-    def __init__(self):
-        # Add your character cleanup rules here
-        self._chars_to_delete = "=#$“”„«»*\""
-        self._translation_table = str.maketrans("", "", self._chars_to_delete)
+## Russian pronunciation dictionaries
 
-    def normalize(self, text: str) -> str:
-        if not text.strip():
-            return text
-            
-        try:
-            # 1. Basic cleanup
-            cleaned_text = text.translate(self._translation_table)
-            
-            # 2. Convert numbers to words (example)
-            cleaned_text = re.sub(
-                r'\b\d+\b', 
-                lambda m: num2words(int(m.group(0)), lang='de'), 
-                cleaned_text
-            )
-            
-            # 3. Final cleanup (ensure multiple spaces are removed)
-            return " ".join(cleaned_text.split())
-            
-        except Exception as e:
-            # Fail-open: if anything fails, log a warning and return original text
-            logger.warning("Normalization failed, falling back to original text: %s", e)
-            return text
-```
+The optional dictionary is a UTF-8 YAML mapping with `pronunciations`,
+`stress`, and `abbreviations` sections. See
+[`supertonic-dictionary.example.yaml`](supertonic-dictionary.example.yaml)
+for a small example. Replacements are literal and non-recursive: replacement
+values are not looked up again or transliterated. Matching is case-insensitive
+and longest-first.
 
-The `de_norm.py` shipped in this repository is a more complete example: besides plain numbers it handles clock times, percentages, degrees, IPv4/IPv6 addresses with CIDR prefixes and dotted version numbers, and it comes with unit tests in `tests/test_de_norm.py` (`python3 -m unittest discover -s tests`, only `num2words` needed).
-
----
-
-### Step 2: Register the Normalizer in `supertonic_engine.py`
-
-
-The engine uses a dynamic registry to load normalizers. You only need to add a single line to tell the engine about your new script.
-
-Open `supertonic_engine.py` and locate the `NORMALIZERS_REGISTRY` dictionary near the top of the file. Add your language code, the module name (the file name without `.py`, preceded by a dot), and your class name.
-
-**Example:**
-```python
-# Registry of available normalizers: "lang_code": ("module_name", "ClassName")
-NORMALIZERS_REGISTRY = {
-    "ru": (".ru_norm", "RussianTextNormalizer"),
-    "de": (".de_norm", "GermanTextNormalizer"),  # <-- Add your new language here
-}
-```
----
-
-### Step 3: Test the Integration
-1.  **Install dependencies**: If your new normalizer uses a specific library, ensure it's installed (`pip install num2words`).
-2.  **Restart the server**: The engine will now automatically route any synthesis request with `lang_code="de"` through your `GermanTextNormalizer`.
-3.  **Check logs**: Because of the logic in `synthesize`, you will see a debug log whenever the text is modified by your new normalizer:
-    `DEBUG: [de] Text prepared for synthesis: einhundert ...`
-
-### Key Requirements for New Normalizers:
-*   **Language Codes**: Use 2-letter ISO codes (e.g., `es`, `fr`, `it`). The engine automatically converts incoming codes like `en-US` to `en`.
-*   **Safety**: Always use `try-except` for imports so the server can still start even if a specific language dependency is missing.
-*   **Tags**: If you use expression tags (like `<laugh>`), ensure your normalizer does not delete the `<` and `>` brackets.
+Set `SUPERTONIC_DICTIONARY_PATH` or `--dictionary-path` to use a file. Invalid
+YAML or a missing configured file fails startup clearly. The dictionary is
+loaded once when the enhanced Russian normalizer is initialized.

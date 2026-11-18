@@ -1,0 +1,14 @@
+# Copy this file and configure SUPERTONIC_DICTIONARY_PATH or --dictionary-path.
+# Keep pronunciation values in the intended written language; Latin words are
+# deliberately not transliterated by the enhanced normalizer.
+
+pronunciations:
+  вебхук: веб-хук
+
+stress:
+  замок: за+мок
+  мука: му́ка
+
+abbreviations:
+  "т. е.": "то есть"
+  "т. к.": "так как"

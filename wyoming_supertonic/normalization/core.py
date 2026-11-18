@@ -269,31 +269,52 @@ class TextNormalizer:
             return marker
 
         text = _acute(text)
+        accentable_markers = set()
+
+        def protect_accentable(value):
+            marker = protect(value)
+            accentable_markers.add(marker)
+            return marker
+
         text = _MARKED_WORD.sub(lambda m: protect(m[0]), text)
         text = self.user.apply(text, protect)
         if cfg.abbreviations:
             text = self.abbreviations.apply(text, protect)
         # Date-looking and identifier tokens are opaque to ordinary number rules,
         # even if date expansion is disabled or the calendar date is invalid.
-        text = _DATE.sub(lambda m: protect(_date_words(m[0]) if cfg.dates else m[0]), text)
+        def protect_date(match):
+            value = _date_words(match[0]) if cfg.dates else match[0]
+            return protect_accentable(value) if value != match[0] else protect(value)
+
+        text = _DATE.sub(protect_date, text)
         text = _IDENTIFIER.sub(lambda m: protect(m[0]), text)
         if cfg.units:
-            text = _UNIT.sub(lambda m: protect(_quantity(m[1], m[2])), text)
+            text = _UNIT.sub(lambda m: protect_accentable(_quantity(m[1], m[2])), text)
         if cfg.numbers:
             def clock(m):
                 h, minute = int(m[1]), int(m[2])
-                return protect(_format_time(h, minute) if h < 24 and minute < 60 else m[0])
+                if h < 24 and minute < 60:
+                    return protect_accentable(_format_time(h, minute))
+                return protect(m[0])
 
             text = _TIME.sub(clock, text)
-            text = _NUMBER.sub(lambda m: _num(m[0]), text)
+            text = _NUMBER.sub(lambda m: protect_accentable(_num(m[0])), text)
         # Ordinary numeric/date expansions still need stress. Protected values
         # with no manual accent are included, while manual exceptions stay exact.
         if self.accentor:
-            for marker, value in protected.items():
-                if "+" not in value and not re.search(r"[A-Za-z\d]", value):
-                    protected[marker] = self.accentor(value)
-            text = re.sub(r"(<\/?(?:laugh|breath|sigh)>)|([A-Za-z][A-Za-z'-]*)|([^<A-Za-z]+)",
-                          lambda m: m[0] if m[1] or m[2] else self.accentor(m[3]), text)
+            accent_pattern = re.compile(r"[А-Яа-яЁё]+(?:\s+[А-Яа-яЁё]+)*")
+
+            def accent_russian(value):
+                return accent_pattern.sub(lambda m: self.accentor(m[0]), value)
+
+            text = re.split("(" + "|".join(map(re.escape, protected)) + ")", text) if protected else [text]
+            text = "".join(
+                accent_russian(protected[part]) if part in accentable_markers
+                else protected[part] if part in protected
+                else accent_russian(part)
+                for part in text
+            )
+            protected = {}
         result = "".join(protected.get(char, char) for char in text)
         return _to_unicode_stress(result)
 
